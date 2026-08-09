@@ -4,8 +4,8 @@ rg_name = {
     location = "korea central"
 
   }
-  rg2 = {
-    rg_name  = "akhilrg2"
+  rg3 = {
+    rg_name  = "akhilrg3"
     location = "korea central"
 
   }
