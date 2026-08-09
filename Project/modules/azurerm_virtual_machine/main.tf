@@ -1,9 +1,9 @@
 resource "azurerm_virtual_machine" "vm" {
-    for_each = var.vms
+  for_each              = var.vms
   name                  = each.value.name
   location              = each.value.location
   resource_group_name   = each.value.rg_name
-   network_interface_ids = [data.azurerm_network_interface.nic[each.key].id]
+  network_interface_ids = [data.azurerm_network_interface.nic[each.key].id]
   vm_size               = each.value.vm_size
 
   storage_image_reference {
