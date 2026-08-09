@@ -4,6 +4,11 @@ rg_name = {
     location = "korea central"
 
   }
+   rg2 = {
+    rg_name  = "akhilrg2"
+    location = "korea central"
+
+  }
 }
 
 vnets = {
