@@ -1,0 +1,100 @@
+name: Terraform PR Pipeline
+
+on:
+  pull_request:
+    branches:
+      - main
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+
+  # ======================================================
+  # TERRAFORM VALIDATE AND PLAN
+  # ======================================================
+
+  terraform:
+    name: Terraform Validate and Plan
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: ./Project
+
+    steps:
+
+      # --------------------------------------------------
+      # 1. Checkout Feature Branch
+      # --------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------
+      # 2. Setup Terraform
+      # --------------------------------------------------
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      # --------------------------------------------------
+      # 3. Terraform Init
+      # --------------------------------------------------
+
+      - name: Terraform Init
+        run: terraform init
+
+      # --------------------------------------------------
+      # 4. Terraform Format Check
+      # --------------------------------------------------
+
+      - name: Terraform Format Check
+        run: terraform fmt -check -recursive
+
+      # --------------------------------------------------
+      # 5. Terraform Validate
+      # --------------------------------------------------
+
+      - name: Terraform Validate
+        run: terraform validate
+
+      # --------------------------------------------------
+      # 6. Azure Login
+      # --------------------------------------------------
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          creds: |
+            {
+              "clientId": "49c3b80f-2b9e-4603-b66b-cd6700196af5",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "784dcbe8-46d9-4a47-be0e-70450bcf37c4",
+              "tenantId": "ff7b0485-25c7-4264-b00f-fd1c4c1f0f08"
+            }
+
+      # --------------------------------------------------
+      # 7. Terraform Plan
+      # --------------------------------------------------
+
+      - name: Terraform Plan
+        run: terraform plan -out=tfplan
+
+      # --------------------------------------------------
+      # 8. Plan Summary
+      # --------------------------------------------------
+
+      - name: Terraform Plan Summary
+        run: terraform show -no-color tfplan > tfplan.txt
+
+      - name: Upload Terraform Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-plan
+          path: Project/tfplan.txt
