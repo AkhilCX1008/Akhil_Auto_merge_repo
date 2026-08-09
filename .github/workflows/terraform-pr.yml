@@ -12,7 +12,7 @@ permissions:
 jobs:
 
   # ======================================================
-  # CREATE PULL REQUEST
+  # 1. CREATE PULL REQUEST
   # ======================================================
 
   create-pr:
@@ -20,20 +20,23 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      pr_number: ${{ steps.pr.outputs.pr_number }}
+      pr_number: ${{ steps.create_pr.outputs.pr_number }}
 
     steps:
 
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Create Pull Request
-        id: pr
+        id: create_pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
 
           PR_NUMBER=$(gh pr list \
+            --repo "$GITHUB_REPOSITORY" \
             --base main \
             --head "${GITHUB_REF_NAME}" \
             --state open \
@@ -42,23 +45,30 @@ jobs:
 
           if [ -z "$PR_NUMBER" ]; then
 
+            echo "No existing PR found."
+
             PR_URL=$(gh pr create \
+              --repo "$GITHUB_REPOSITORY" \
               --base main \
               --head "${GITHUB_REF_NAME}" \
               --title "Terraform Changes - ${GITHUB_REF_NAME}" \
-              --body "Automated Terraform Pull Request created from ${GITHUB_REF_NAME}.")
+              --body "Automated Terraform PR from ${GITHUB_REF_NAME} to main.")
 
-            PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq '.number')
+            PR_NUMBER=$(gh pr view "$PR_URL" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json number \
+              --jq '.number')
 
             echo "Created PR #$PR_NUMBER"
 
           else
 
-            echo "PR #$PR_NUMBER already exists"
+            echo "PR #$PR_NUMBER already exists."
 
           fi
 
           echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
 
       # --------------------------------------------------
       # Request Reviewer
@@ -67,20 +77,27 @@ jobs:
       - name: Request Reviewer
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          PR_NUMBER: ${{ steps.create_pr.outputs.pr_number }}
           REVIEWER: ${{ vars.REVIEWER_USERNAME }}
         run: |
 
           if [ -n "$REVIEWER" ]; then
-            gh pr edit "$PR_NUMBER" --add-reviewer "$REVIEWER"
-            echo "Reviewer requested: $REVIEWER"
+
+            echo "Requesting reviewer: $REVIEWER"
+
+            gh pr edit "$PR_NUMBER" \
+              --repo "$GITHUB_REPOSITORY" \
+              --add-reviewer "$REVIEWER"
+
           else
-            echo "REVIEWER_USERNAME is not configured."
+
+            echo "REVIEWER_USERNAME variable is not configured."
+
           fi
 
 
   # ======================================================
-  # TERRAFORM VALIDATE AND PLAN
+  # 2. TERRAFORM VALIDATE AND PLAN
   # ======================================================
 
   terraform:
@@ -94,42 +111,49 @@ jobs:
     steps:
 
       # --------------------------------------------------
-      # 1. Checkout
+      # Checkout
       # --------------------------------------------------
 
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
 
       # --------------------------------------------------
-      # 2. Setup Terraform
+      # Setup Terraform
       # --------------------------------------------------
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
 
+
       # --------------------------------------------------
-      # 3. Terraform Init
+      # Terraform Init
       # --------------------------------------------------
 
       - name: Terraform Init
         run: terraform init
 
+
       # --------------------------------------------------
-      # 4. Terraform Format Check
+      # Terraform Format
       # --------------------------------------------------
 
       - name: Terraform Format Check
         run: terraform fmt -check -recursive
 
+
       # --------------------------------------------------
-      # 5. Terraform Validate
+      # Terraform Validate
       # --------------------------------------------------
 
       - name: Terraform Validate
         run: terraform validate
 
+
       # --------------------------------------------------
-      # 6. Azure Login
+      # Azure Login
       # --------------------------------------------------
 
       - name: Azure Login
@@ -143,29 +167,33 @@ jobs:
               "tenantId": "${{ vars.AZURE_TENANT_ID }}"
             }
 
+
       # --------------------------------------------------
-      # 7. Verify Azure Login
+      # Verify Azure Login
       # --------------------------------------------------
 
       - name: Verify Azure Login
         run: az account show
 
+
       # --------------------------------------------------
-      # 8. Terraform Plan
+      # Terraform Plan
       # --------------------------------------------------
 
       - name: Terraform Plan
         run: terraform plan -out=tfplan
 
+
       # --------------------------------------------------
-      # 9. Terraform Plan Summary
+      # Terraform Plan Summary
       # --------------------------------------------------
 
       - name: Terraform Plan Summary
         run: terraform show -no-color tfplan > tfplan.txt
 
+
       # --------------------------------------------------
-      # 10. Upload Plan
+      # Upload Terraform Plan
       # --------------------------------------------------
 
       - name: Upload Terraform Plan
@@ -176,7 +204,7 @@ jobs:
 
 
   # ======================================================
-  # ENABLE AUTO MERGE
+  # 3. ENABLE AUTO MERGE
   # ======================================================
 
   enable-auto-merge:
@@ -189,26 +217,41 @@ jobs:
 
     steps:
 
-      # --------------------------------------------------
-      # IMPORTANT: Checkout Repository
-      # --------------------------------------------------
-
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-
-      # --------------------------------------------------
-      # Enable Auto Merge
-      # --------------------------------------------------
-
       - name: Enable Auto Merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ needs.create-pr.outputs.pr_number }}
         run: |
 
-          echo "Enabling auto-merge for PR #$PR_NUMBER"
+          echo "PR Number: $PR_NUMBER"
 
-          gh pr merge "$PR_NUMBER" \
-            --auto \
-            --squash \
-            --delete-branch
+          PR_ID=$(gh pr view "$PR_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json id \
+            --jq '.id')
+
+          echo "PR ID: $PR_ID"
+
+          echo "Enabling auto-merge..."
+
+          gh api graphql \
+            -f query='
+              mutation($pullRequestId:ID!) {
+                enablePullRequestAutoMerge(
+                  input: {
+                    pullRequestId:$pullRequestId
+                    mergeMethod:SQUASH
+                  }
+                ) {
+                  pullRequest {
+                    number
+                    autoMergeRequest {
+                      enabledAt
+                      mergeMethod
+                    }
+                  }
+                }
+              }' \
+            -f pullRequestId="$PR_ID"
+
+          echo "Auto-merge enabled successfully."
