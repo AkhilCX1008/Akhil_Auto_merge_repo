@@ -1,5 +1,5 @@
 resource "azurerm_network_interface" "nic" {
-    for_each = var.nic_ids
+  for_each            = var.nic_ids
   name                = each.value.name
   location            = each.value.location
   resource_group_name = each.value.rg_name
@@ -7,7 +7,7 @@ resource "azurerm_network_interface" "nic" {
   ip_configuration {
     name                          = each.value.ip_configuration.name
     subnet_id                     = data.azurerm_subnet.subnets[each.key].id
-   private_ip_address_allocation = each.value.ip_configuration.private_ip_address_allocation
+    private_ip_address_allocation = each.value.ip_configuration.private_ip_address_allocation
   }
 
 

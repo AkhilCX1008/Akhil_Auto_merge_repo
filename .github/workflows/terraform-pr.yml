@@ -1,19 +1,83 @@
 name: Terraform PR Pipeline
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
+      - feature
 
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
+
+  # ======================================================
+  # CREATE PULL REQUEST
+  # ======================================================
+
+  create-pr:
+    name: Create Pull Request
+    runs-on: ubuntu-latest
+
+    outputs:
+      pr_number: ${{ steps.pr.outputs.pr_number }}
+
+    steps:
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Create Pull Request
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+
+          PR_NUMBER=$(gh pr list \
+            --base main \
+            --head "${GITHUB_REF_NAME}" \
+            --state open \
+            --json number \
+            --jq '.[0].number')
+
+          if [ -z "$PR_NUMBER" ]; then
+
+            PR_URL=$(gh pr create \
+              --base main \
+              --head "${GITHUB_REF_NAME}" \
+              --title "Terraform Changes - ${GITHUB_REF_NAME}" \
+              --body "Automated Terraform Pull Request created from ${GITHUB_REF_NAME}.")
+
+            PR_NUMBER=$(gh pr view "$PR_URL" --json number --jq '.number')
+
+            echo "Created PR #$PR_NUMBER"
+
+          else
+
+            echo "PR #$PR_NUMBER already exists"
+
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+
+      # --------------------------------------------------
+      # Request Reviewer
+      # --------------------------------------------------
+
+      - name: Request Reviewer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          REVIEWER: ${{ vars.REVIEWER_USERNAME }}
+        run: |
+
+          if [ -n "$REVIEWER" ]; then
+            gh pr edit "$PR_NUMBER" --add-reviewer "$REVIEWER"
+            echo "Reviewer requested: $REVIEWER"
+          else
+            echo "REVIEWER_USERNAME is not configured."
+          fi
+
 
   # ======================================================
   # TERRAFORM VALIDATE AND PLAN
@@ -30,7 +94,7 @@ jobs:
     steps:
 
       # --------------------------------------------------
-      # 1. Checkout Feature Branch
+      # 1. Checkout
       # --------------------------------------------------
 
       - name: Checkout Repository
@@ -73,28 +137,78 @@ jobs:
         with:
           creds: |
             {
-              "clientId": "49c3b80f-2b9e-4603-b66b-cd6700196af5",
+              "clientId": "${{ vars.AZURE_CLIENT_ID }}",
               "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "784dcbe8-46d9-4a47-be0e-70450bcf37c4",
-              "tenantId": "ff7b0485-25c7-4264-b00f-fd1c4c1f0f08"
+              "subscriptionId": "${{ vars.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ vars.AZURE_TENANT_ID }}"
             }
 
       # --------------------------------------------------
-      # 7. Terraform Plan
+      # 7. Verify Azure Login
+      # --------------------------------------------------
+
+      - name: Verify Azure Login
+        run: az account show
+
+      # --------------------------------------------------
+      # 8. Terraform Plan
       # --------------------------------------------------
 
       - name: Terraform Plan
         run: terraform plan -out=tfplan
 
       # --------------------------------------------------
-      # 8. Plan Summary
+      # 9. Terraform Plan Summary
       # --------------------------------------------------
 
       - name: Terraform Plan Summary
         run: terraform show -no-color tfplan > tfplan.txt
+
+      # --------------------------------------------------
+      # 10. Upload Plan
+      # --------------------------------------------------
 
       - name: Upload Terraform Plan
         uses: actions/upload-artifact@v4
         with:
           name: terraform-plan
           path: Project/tfplan.txt
+
+
+  # ======================================================
+  # ENABLE AUTO MERGE
+  # ======================================================
+
+  enable-auto-merge:
+    name: Enable Auto Merge
+    runs-on: ubuntu-latest
+
+    needs:
+      - create-pr
+      - terraform
+
+    steps:
+
+      # --------------------------------------------------
+      # IMPORTANT: Checkout Repository
+      # --------------------------------------------------
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # --------------------------------------------------
+      # Enable Auto Merge
+      # --------------------------------------------------
+
+      - name: Enable Auto Merge
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ needs.create-pr.outputs.pr_number }}
+        run: |
+
+          echo "Enabling auto-merge for PR #$PR_NUMBER"
+
+          gh pr merge "$PR_NUMBER" \
+            --auto \
+            --squash \
+            --delete-branch
