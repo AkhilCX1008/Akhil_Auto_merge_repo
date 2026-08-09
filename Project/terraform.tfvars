@@ -1,19 +1,15 @@
 rg_name = {
-  rg1 = {
+  rg8 = {
     rg_name  = "akhilrg"
     location = "korea central"
 
   }
-  rg3 = {
+  rg9 = {
     rg_name  = "akhilrg3"
     location = "korea central"
 
   }
-  rg4 = {
-    rg_name  = "akhilrg4"
-    location = "korea central"
 
-  }
 }
 
 vnets = {
